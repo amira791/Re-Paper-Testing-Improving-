@@ -1,6 +1,6 @@
 """
-FIXED DEEP LEARNING DATA PREPARATION FOR SOH ESTIMATION
-Phase 1: Sequence Creation and Feature Engineering - FIXED VERSION
+OPTIMIZED DEEP LEARNING DATA PREPARATION FOR SOH ESTIMATION
+Phase 1: Sequence Creation and Feature Engineering - OPTIMIZED VERSION
 """
 import numpy as np
 import pandas as pd
@@ -16,9 +16,13 @@ from pathlib import Path
 import joblib
 import matplotlib.pyplot as plt
 from tqdm import tqdm
+import time
+
+# Debug mode for faster testing
+DEBUG_MODE = False  # Set to True for faster testing, False for full run
 
 class SOHSequenceDataset(Dataset):
-    """Create sequence datasets for deep learning models"""
+    """Create sequence datasets for deep learning models - OPTIMIZED VERSION"""
     
     def __init__(self, df, sequence_length=360, target_col='soh_capacity', 
                  step_size=10, mode='train', vehicle_ids=None):
@@ -31,6 +35,14 @@ class SOHSequenceDataset(Dataset):
             mode: 'train', 'val', or 'test'
             vehicle_ids: Specific vehicles to include
         """
+        start_time = time.time()
+        
+        # Adjust for debug mode
+        if DEBUG_MODE:
+            sequence_length = min(sequence_length, 60)  # Shorter sequences for testing
+            step_size = max(step_size, 30)  # Less overlap
+            print("DEBUG MODE: Using reduced parameters")
+        
         self.sequence_length = sequence_length
         self.target_col = target_col
         self.step_size = step_size
@@ -42,6 +54,11 @@ class SOHSequenceDataset(Dataset):
         else:
             self.df = df.copy()
         
+        # Sample for debugging
+        if DEBUG_MODE and len(self.df) > 10000:
+            self.df = self.df.sample(n=10000, random_state=42)
+            print(f"DEBUG: Sampled to {len(self.df):,} rows")
+        
         # Ensure session_change exists
         if 'session_change' not in self.df.columns:
             print("Warning: 'session_change' column not found. Creating it...")
@@ -51,9 +68,11 @@ class SOHSequenceDataset(Dataset):
         self._define_feature_groups()
         
         # Prepare sequences
+        print(f"Creating sequences for {mode} set...")
         self.sequences, self.targets, self.metadata = self._create_sequences()
         
-        print(f"Created {len(self.sequences)} sequences of length {sequence_length}")
+        elapsed = time.time() - start_time
+        print(f"Created {len(self.sequences)} sequences of length {sequence_length} in {elapsed:.1f}s")
         print(f"Features: {len(self.feature_cols)}")
     
     def _create_session_change(self):
@@ -97,75 +116,102 @@ class SOHSequenceDataset(Dataset):
                 if feat in self.df.columns:
                     self.feature_cols.append(feat)
         
-        # Add rolling statistics
-        self._add_rolling_features()
+        # Add rolling statistics - OPTIMIZED VERSION
+        self._add_rolling_features_optimized()
     
-    def _add_rolling_features(self):
-        """Add rolling window statistics as features - FIXED VERSION"""
+    def _add_rolling_features_optimized(self):
+        """Add rolling window statistics as features - OPTIMIZED VERSION"""
         
-        print("Creating rolling window features...")
+        print("Creating rolling window features (optimized)...")
+        start_time = time.time()
         
-        # Create a copy to avoid SettingWithCopyWarning
-        df_copy = self.df.copy()
+        # Sort data for rolling operations
+        self.df = self.df.sort_values(['vehicle_id', 'session_change', 'time']).reset_index(drop=True)
         
-        # Group by vehicle and session for proper rolling
-        for vehicle_id in df_copy['vehicle_id'].unique():
-            vehicle_mask = df_copy['vehicle_id'] == vehicle_id
+        # Create a group key for rolling operations
+        group_key = ['vehicle_id', 'session_change']
+        
+        # 5-minute rolling features (30 samples at 10s intervals) - VECTORIZED
+        if 'hv_current' in self.df.columns:
+            print("  Creating current rolling features...")
+            # Use groupby + rolling with vectorized operations
+            self.df['rolling_mean_current_5min'] = (
+                self.df.groupby(group_key)['hv_current']
+                .rolling(window=30, min_periods=5, center=False)
+                .mean()
+                .reset_index(level=[0,1], drop=True)
+            )
             
-            for session in df_copy.loc[vehicle_mask, 'session_change'].unique():
-                session_mask = vehicle_mask & (df_copy['session_change'] == session)
-                
-                # Skip short sessions
-                if session_mask.sum() < 30:
-                    continue
-                
-                # Get indices for this session
-                session_indices = df_copy.index[session_mask]
-                
-                # 5-minute rolling features (30 samples at 10s intervals)
-                if 'hv_current' in df_copy.columns:
-                    df_copy.loc[session_indices, 'rolling_mean_current_5min'] = (
-                        df_copy.loc[session_indices, 'hv_current'].rolling(window=30, min_periods=5).mean()
-                    )
-                    df_copy.loc[session_indices, 'rolling_std_current_5min'] = (
-                        df_copy.loc[session_indices, 'hv_current'].rolling(window=30, min_periods=5).std()
-                    )
-                
-                if 'bcell_maxVoltage' in df_copy.columns and 'bcell_minVoltage' in df_copy.columns:
-                    df_copy.loc[session_indices, 'rolling_voltage_range_5min'] = (
-                        df_copy.loc[session_indices, 'bcell_maxVoltage'].rolling(window=30, min_periods=5).max() -
-                        df_copy.loc[session_indices, 'bcell_minVoltage'].rolling(window=30, min_periods=5).min()
-                    )
-                
-                if 'bcell_maxTemp' in df_copy.columns:
-                    df_copy.loc[session_indices, 'temp_variance_5min'] = (
-                        df_copy.loc[session_indices, 'bcell_maxTemp'].rolling(window=30, min_periods=5).var()
-                    )
+            self.df['rolling_std_current_5min'] = (
+                self.df.groupby(group_key)['hv_current']
+                .rolling(window=30, min_periods=5, center=False)
+                .std()
+                .reset_index(level=[0,1], drop=True)
+            )
         
-        # Add cumulative features - FIXED VERSION
-        if 'hv_current' in df_copy.columns:
-            # Create cumulative charge and discharge using pandas groupby properly
-            df_copy['cumulative_charge'] = 0.0
-            df_copy['cumulative_discharge'] = 0.0
+        if 'bcell_maxVoltage' in self.df.columns and 'bcell_minVoltage' in self.df.columns:
+            print("  Creating voltage rolling features...")
+            # Voltage range
+            rolling_max = (
+                self.df.groupby(group_key)['bcell_maxVoltage']
+                .rolling(window=30, min_periods=5, center=False)
+                .max()
+                .reset_index(level=[0,1], drop=True)
+            )
             
-            for vehicle_id in df_copy['vehicle_id'].unique():
-                for session in df_copy[df_copy['vehicle_id'] == vehicle_id]['session_change'].unique():
-                    session_mask = (df_copy['vehicle_id'] == vehicle_id) & (df_copy['session_change'] == session)
-                    
-                    # Calculate cumulative charge (positive current)
-                    charge_mask = df_copy.loc[session_mask, 'hv_current'] > 0
-                    df_copy.loc[session_mask & charge_mask, 'cumulative_charge'] = (
-                        df_copy.loc[session_mask & charge_mask, 'hv_current'].abs().cumsum()
-                    )
-                    
-                    # Calculate cumulative discharge (negative current)
-                    discharge_mask = df_copy.loc[session_mask, 'hv_current'] < 0
-                    df_copy.loc[session_mask & discharge_mask, 'cumulative_discharge'] = (
-                        df_copy.loc[session_mask & discharge_mask, 'hv_current'].abs().cumsum()
-                    )
+            rolling_min = (
+                self.df.groupby(group_key)['bcell_minVoltage']
+                .rolling(window=30, min_periods=5, center=False)
+                .min()
+                .reset_index(level=[0,1], drop=True)
+            )
+            
+            self.df['rolling_voltage_range_5min'] = rolling_max - rolling_min
         
-        # Update self.df with new features
-        self.df = df_copy
+        if 'bcell_maxTemp' in self.df.columns:
+            print("  Creating temperature rolling features...")
+            self.df['temp_variance_5min'] = (
+                self.df.groupby(group_key)['bcell_maxTemp']
+                .rolling(window=30, min_periods=5, center=False)
+                .var()
+                .reset_index(level=[0,1], drop=True)
+            )
+        
+        # Cumulative features - OPTIMIZED
+        if 'hv_current' in self.df.columns:
+            print("  Creating cumulative features...")
+            # Create masks for charge/discharge
+            charge_mask = self.df['hv_current'] > 0
+            discharge_mask = self.df['hv_current'] < 0
+            
+            # Initialize columns with zeros
+            self.df['cumulative_charge'] = 0.0
+            self.df['cumulative_discharge'] = 0.0
+            
+            # Use vectorized groupby operations
+            if charge_mask.any():
+                # Create a temporary column for absolute current during charging
+                self.df.loc[charge_mask, 'abs_charge_current'] = self.df.loc[charge_mask, 'hv_current'].abs()
+                # Grouped cumulative sum
+                self.df.loc[charge_mask, 'cumulative_charge'] = (
+                    self.df.loc[charge_mask]
+                    .groupby(group_key)['abs_charge_current']
+                    .transform(lambda x: x.cumsum())
+                )
+                # Clean up temporary column
+                self.df = self.df.drop('abs_charge_current', axis=1, errors='ignore')
+            
+            if discharge_mask.any():
+                # Create a temporary column for absolute current during discharging
+                self.df.loc[discharge_mask, 'abs_discharge_current'] = self.df.loc[discharge_mask, 'hv_current'].abs()
+                # Grouped cumulative sum
+                self.df.loc[discharge_mask, 'cumulative_discharge'] = (
+                    self.df.loc[discharge_mask]
+                    .groupby(group_key)['abs_discharge_current']
+                    .transform(lambda x: x.cumsum())
+                )
+                # Clean up temporary column
+                self.df = self.df.drop('abs_discharge_current', axis=1, errors='ignore')
         
         # Add statistical features to list
         self.stat_features = [
@@ -174,71 +220,95 @@ class SOHSequenceDataset(Dataset):
             'cumulative_charge', 'cumulative_discharge'
         ]
         
+        # Fill NaN values in new features efficiently
+        for feat in self.stat_features:
+            if feat in self.df.columns:
+                # Use vectorized fillna
+                self.df[feat] = self.df[feat].fillna(method='ffill', limit=10).fillna(0)
+        
         # Add to feature columns if they exist
         for feat in self.stat_features:
-            if feat in self.df.columns:
+            if feat in self.df.columns and feat not in self.feature_cols:
                 self.feature_cols.append(feat)
         
-        # Fill NaN values in new features
-        for feat in self.stat_features:
-            if feat in self.df.columns:
-                self.df[feat] = self.df[feat].fillna(method='ffill').fillna(0)
+        elapsed = time.time() - start_time
+        print(f"  Rolling features created in {elapsed:.2f}s")
+        print(f"  Added {len(self.stat_features)} statistical features")
     
-    def _create_sequences(self):
-        """Create overlapping sequences from time series data"""
+    def _create_sequences_optimized(self):
+        """Create overlapping sequences from time series data - OPTIMIZED"""
         
         sequences = []
         targets = []
-        metadata = []  # Store vehicle_id, session_id, timestamp
+        metadata = []
         
         # Group by vehicle and session
         grouped = self.df.groupby(['vehicle_id', 'session_change'])
+        total_groups = len(grouped)
         
-        for (vehicle_id, session_id), group in tqdm(grouped, desc="Creating sequences"):
-            # Sort by time
-            if 'time' in group.columns:
-                group = group.sort_values('time')
-            elif 'relative_time' in group.columns:
-                group = group.sort_values('relative_time')
+        print(f"Processing {total_groups} vehicle-session groups...")
+        
+        # Pre-collect all indices to avoid repeated .loc calls
+        all_indices = []
+        all_vehicle_ids = []
+        all_session_ids = []
+        
+        for (vehicle_id, session_id), group_indices in grouped.groups.items():
+            all_indices.append(group_indices)
+            all_vehicle_ids.append(vehicle_id)
+            all_session_ids.append(session_id)
+        
+        # Process in chunks to avoid memory issues
+        chunk_size = 100  # Process 100 groups at a time
+        for chunk_idx in range(0, len(all_indices), chunk_size):
+            chunk_end = min(chunk_idx + chunk_size, len(all_indices))
             
-            # Ensure we have target values
-            if self.target_col not in group.columns or group[self.target_col].isna().all():
-                continue
-            
-            # Get feature matrix - ensure all features exist
-            available_features = [f for f in self.feature_cols if f in group.columns]
-            feature_data = group[available_features].values
-            target_data = group[self.target_col].values
-            
-            # Skip if not enough data for one sequence
-            if len(feature_data) < self.sequence_length:
-                continue
-            
-            # Create sequences with sliding window
-            for i in range(0, len(feature_data) - self.sequence_length, self.step_size):
-                seq_end = i + self.sequence_length
+            for i in range(chunk_idx, chunk_end):
+                group_indices = all_indices[i]
+                vehicle_id = all_vehicle_ids[i]
+                session_id = all_session_ids[i]
                 
-                # Check if we have valid target at the end of sequence
-                if not np.isnan(target_data[seq_end - 1]):
-                    sequence = feature_data[i:seq_end]
+                # Get data for this group
+                group = self.df.loc[group_indices].copy()
+                
+                # Sort by time if needed
+                if 'time' in group.columns:
+                    group = group.sort_values('time')
+                
+                # Ensure we have target values
+                if self.target_col not in group.columns or group[self.target_col].isna().all():
+                    continue
+                
+                # Get feature matrix - ensure all features exist
+                available_features = [f for f in self.feature_cols if f in group.columns]
+                feature_data = group[available_features].values
+                target_data = group[self.target_col].values
+                
+                # Skip if not enough data for one sequence
+                if len(feature_data) < self.sequence_length:
+                    continue
+                
+                # Create sequences with sliding window
+                max_start = len(feature_data) - self.sequence_length
+                
+                for start_idx in range(0, max_start + 1, self.step_size):
+                    end_idx = start_idx + self.sequence_length
                     
-                    # Handle missing features by padding with zeros
-                    if sequence.shape[1] < len(self.feature_cols):
-                        padding = np.zeros((sequence.shape[0], len(self.feature_cols) - sequence.shape[1]))
-                        sequence = np.hstack([sequence, padding])
-                    
-                    target = target_data[seq_end - 1]  # Predict SOH at end of sequence
-                    
-                    # Only include if sequence doesn't have too many NaNs
-                    if np.isnan(sequence).mean() < 0.3:  # Less than 30% NaN (relaxed)
-                        sequences.append(sequence)
-                        targets.append(target)
-                        metadata.append({
-                            'vehicle_id': vehicle_id,
-                            'session_id': session_id,
-                            'start_idx': i,
-                            'end_idx': seq_end
-                        })
+                    # Check if we have valid target at the end of sequence
+                    if not np.isnan(target_data[end_idx - 1]):
+                        sequence = feature_data[start_idx:end_idx]
+                        
+                        # Quick NaN check
+                        nan_ratio = np.isnan(sequence).mean()
+                        if nan_ratio < 0.3:  # Less than 30% NaN (relaxed)
+                            sequences.append(sequence)
+                            targets.append(target_data[end_idx - 1])
+                            metadata.append({
+                                'vehicle_id': vehicle_id,
+                                'session_id': session_id,
+                                'start_idx': start_idx,
+                                'end_idx': end_idx
+                            })
         
         if len(sequences) == 0:
             raise ValueError("No valid sequences created! Check your data and parameters.")
@@ -247,15 +317,38 @@ class SOHSequenceDataset(Dataset):
         sequences_array = np.array(sequences, dtype=np.float32)
         targets_array = np.array(targets, dtype=np.float32)
         
-        # Handle NaN values in sequences
-        for i in range(len(sequences_array)):
-            seq = sequences_array[i]
-            # Replace NaN with forward fill, then backward fill, then zeros
-            df_seq = pd.DataFrame(seq)
-            df_seq = df_seq.fillna(method='ffill', axis=0).fillna(method='bfill', axis=0).fillna(0)
-            sequences_array[i] = df_seq.values
+        # Handle NaN values in sequences efficiently
+        print("Handling NaN values in sequences...")
+        
+        # Vectorized NaN handling
+        nan_mask = np.isnan(sequences_array)
+        if nan_mask.any():
+            # Create a copy for processing
+            seq_clean = sequences_array.copy()
+            
+            # Forward fill along time axis (axis=1)
+            for i in range(1, seq_clean.shape[1]):
+                current_nan = np.isnan(seq_clean[:, i, :])
+                prev_not_nan = ~np.isnan(seq_clean[:, i-1, :])
+                fill_mask = current_nan & prev_not_nan
+                seq_clean[:, i, :][fill_mask] = seq_clean[:, i-1, :][fill_mask]
+            
+            # Backward fill along time axis
+            for i in range(seq_clean.shape[1]-2, -1, -1):
+                current_nan = np.isnan(seq_clean[:, i, :])
+                next_not_nan = ~np.isnan(seq_clean[:, i+1, :])
+                fill_mask = current_nan & next_not_nan
+                seq_clean[:, i, :][fill_mask] = seq_clean[:, i+1, :][fill_mask]
+            
+            # Fill remaining with zeros
+            seq_clean[np.isnan(seq_clean)] = 0
+            sequences_array = seq_clean
         
         return sequences_array, targets_array, metadata
+    
+    def _create_sequences(self):
+        """Wrapper for sequence creation - uses optimized version"""
+        return self._create_sequences_optimized()
     
     def __len__(self):
         return len(self.sequences)
@@ -275,7 +368,7 @@ class SOHSequenceDataset(Dataset):
 
 
 class DataScaler:
-    """Handle scaling and normalization of sequences - FIXED VERSION"""
+    """Handle scaling and normalization of sequences - OPTIMIZED VERSION"""
     
     def __init__(self, scaler_type='standard'):
         self.scaler_type = scaler_type
@@ -288,10 +381,14 @@ class DataScaler:
         n_features = sequences.shape[2]
         
         print(f"Fitting scalers for {n_features} features...")
+        start_time = time.time()
+        
+        # Flatten sequences for batch processing
+        sequences_flat = sequences.reshape(-1, n_features)
         
         for feature_idx in range(n_features):
-            # Extract all values for this feature across all sequences
-            feature_values = sequences[:, :, feature_idx].reshape(-1, 1)
+            # Extract values for this feature
+            feature_values = sequences_flat[:, feature_idx].reshape(-1, 1)
             
             # Remove NaN values
             non_nan_mask = ~np.isnan(feature_values.flatten())
@@ -328,18 +425,23 @@ class DataScaler:
                 'n_samples': len(clean_values)
             }
         
+        elapsed = time.time() - start_time
+        print(f"Scalers fitted in {elapsed:.2f}s")
         return self
     
     def transform(self, sequences):
-        """Transform sequences using fitted scalers"""
+        """Transform sequences using fitted scalers - OPTIMIZED"""
         n_samples, seq_len, n_features = sequences.shape
-        transformed = np.zeros_like(sequences)
+        
+        # Reshape to 2D for batch transformation
+        sequences_2d = sequences.reshape(-1, n_features)
+        transformed_2d = np.zeros_like(sequences_2d)
         
         for feature_idx in range(n_features):
             scaler = self.scalers.get(feature_idx)
             if scaler:
-                # Reshape, transform, reshape back
-                feature_values = sequences[:, :, feature_idx].reshape(-1, 1)
+                # Extract and transform this feature
+                feature_values = sequences_2d[:, feature_idx].reshape(-1, 1)
                 
                 # Handle NaN values
                 nan_mask = np.isnan(feature_values.flatten())
@@ -359,8 +461,10 @@ class DataScaler:
                     transformed_values[nan_mask] = np.nan
                     transformed_values = transformed_values.reshape(-1, 1)
                 
-                transformed[:, :, feature_idx] = transformed_values.reshape(n_samples, seq_len)
+                transformed_2d[:, feature_idx] = transformed_values.flatten()
         
+        # Reshape back to 3D
+        transformed = transformed_2d.reshape(n_samples, seq_len, n_features)
         return transformed
     
     def save(self, path):
@@ -382,7 +486,7 @@ class DataScaler:
 
 def prepare_dataloaders(df, config):
     """
-    Prepare train/val/test dataloaders with proper splitting - FIXED VERSION
+    Prepare train/val/test dataloaders with proper splitting - OPTIMIZED VERSION
     """
     
     # Configuration
@@ -391,6 +495,12 @@ def prepare_dataloaders(df, config):
     val_ratio = config.get('val_ratio', 0.15)
     test_ratio = config.get('test_ratio', 0.15)
     random_seed = config.get('random_seed', 42)
+    
+    # Reduce parameters for debug mode
+    if DEBUG_MODE:
+        seq_length = min(seq_length, 60)
+        batch_size = min(batch_size, 16)
+        print("DEBUG: Using reduced sequence length and batch size")
     
     # Ensure target column exists
     if 'soh_capacity' not in df.columns:
@@ -455,7 +565,7 @@ def prepare_dataloaders(df, config):
     print(f"Scaler saved to data_scaler.pkl")
     
     # Create dataloaders
-    num_workers = config.get('num_workers', 2)  # Reduced for stability
+    num_workers = config.get('num_workers', 0)  # Set to 0 for debugging, 2-4 for production
     
     train_loader = DataLoader(
         train_dataset,
@@ -641,18 +751,44 @@ def analyze_data_quality(df):
 
 
 def main_data_preparation():
-    """Main data preparation pipeline - FIXED VERSION"""
+    """Main data preparation pipeline - OPTIMIZED VERSION"""
     
+    total_start_time = time.time()
     print("="*80)
-    print("PHASE 1: DEEP LEARNING DATA PREPARATION")
+    print("PHASE 1: OPTIMIZED DEEP LEARNING DATA PREPARATION")
     print("="*80)
     
-    # Load cleaned data
+    # Load cleaned data with selective columns to save memory
     data_path = Path(r"C:\Users\admin\Desktop\DR2\3 Coding\Re-Paper-Testing-Improving-\Paper 05 (10 EVs)\dataset_10EVs")
-    df_cleaned = pd.read_parquet(data_path / "all_vehicles_cleaned.parquet")
     
-    print(f"Loaded cleaned data: {df_cleaned.shape}")
-    print(f"Columns: {list(df_cleaned.columns)[:20]}...")  # Show first 20 columns
+    # Define essential columns
+    essential_cols = [
+        'vehicle_id', 'soh_capacity', 'vhc_speed', 'hv_current', 
+        'hv_voltage', 'bcell_soc', 'bcell_maxVoltage', 'bcell_minVoltage',
+        'bcell_maxTemp', 'bcell_minTemp', 'time', 'session_change',
+        'cell_imbalance', 'temp_gradient', 'power_kw'
+    ]
+    
+    print("Loading essential columns from cleaned data...")
+    load_start = time.time()
+    
+    # Try to load only essential columns
+    try:
+        df_cleaned = pd.read_parquet(data_path / "all_vehicles_cleaned.parquet", 
+                                    columns=essential_cols)
+    except:
+        # If column selection fails, load all and select
+        print("Column selection failed, loading all columns...")
+        df_cleaned = pd.read_parquet(data_path / "all_vehicles_cleaned.parquet")
+        df_cleaned = df_cleaned[essential_cols]
+    
+    load_time = time.time() - load_start
+    print(f"Data loaded in {load_time:.2f}s: {len(df_cleaned):,} rows × {len(df_cleaned.columns)} columns")
+    
+    # Sample for debug mode
+    if DEBUG_MODE and len(df_cleaned) > 50000:
+        df_cleaned = df_cleaned.sample(n=50000, random_state=42)
+        print(f"DEBUG: Sampled to {len(df_cleaned):,} rows")
     
     # Analyze data quality
     analyze_data_quality(df_cleaned)
@@ -668,21 +804,32 @@ def main_data_preparation():
     
     # Configuration for data preparation
     config = {
-        'sequence_length': 180,  # Reduced to 30 minutes for testing (180 = 30 min at 10s intervals)
-        'batch_size': 16,  # Reduced for testing
+        'sequence_length': 180 if not DEBUG_MODE else 60,  # 30 min at 10s intervals (60 for debug)
+        'batch_size': 32 if not DEBUG_MODE else 16,
         'val_ratio': 0.15,
         'test_ratio': 0.15,
         'random_seed': 42,
-        'num_workers': 0  # Set to 0 for debugging, increase for production
+        'num_workers': 0  # Set to 0 for stability, increase for production
     }
     
     print(f"\nConfiguration:")
     for key, value in config.items():
         print(f"  {key}: {value}")
     
+    if DEBUG_MODE:
+        print("\n⚠️ DEBUG MODE ACTIVE: Using reduced parameters")
+    
     # Prepare dataloaders
     try:
+        print("\n" + "="*60)
+        print("PREPARING DATALOADERS")
+        print("="*60)
+        
+        prep_start = time.time()
         dataloaders = prepare_dataloaders(df_cleaned, config)
+        prep_time = time.time() - prep_start
+        
+        print(f"\nData preparation completed in {prep_time:.2f}s")
         
         # Visualize samples
         visualize_sequences(dataloaders)
@@ -693,11 +840,21 @@ def main_data_preparation():
             'sequence_length': config['sequence_length'],
             'vehicle_splits': dataloaders['vehicle_splits'],
             'num_features': len(dataloaders['feature_names']),
-            'target_column': 'soh_capacity'
+            'target_column': 'soh_capacity',
+            'debug_mode': DEBUG_MODE
         }
         
         joblib.dump(data_config, 'data_config.pkl')
         print(f"\nData configuration saved to data_config.pkl")
+        
+        # Final timing
+        total_time = time.time() - total_start_time
+        print(f"\n" + "="*60)
+        print("PHASE 1 COMPLETED SUCCESSFULLY!")
+        print("="*60)
+        print(f"Total execution time: {total_time:.2f} seconds")
+        print(f"Training sequences: {len(dataloaders['train_loader'].dataset):,}")
+        print(f"Features: {len(dataloaders['feature_names'])}")
         
         return dataloaders, data_config
         
@@ -710,9 +867,24 @@ def main_data_preparation():
 
 if __name__ == "__main__":
     try:
+        print("\n" + "="*80)
+        print("STARTING DATA PREPARATION PIPELINE")
+        print(f"Debug Mode: {DEBUG_MODE}")
+        print("="*80)
+        
+        # Set environment variables for better performance
+        import os
+        os.environ['OMP_NUM_THREADS'] = '4'
+        os.environ['MKL_NUM_THREADS'] = '4'
+        
         dataloaders, data_config = main_data_preparation()
         if dataloaders:
-            print("\n Phase 1 completed successfully!")
+            print("\n✅ Phase 1 completed successfully!")
+        else:
+            print("\n❌ Phase 1 failed!")
+            
+    except KeyboardInterrupt:
+        print("\n\n⚠️ Process interrupted by user")
     except Exception as e:
         print(f"\n❌ Critical error in Phase 1: {e}")
         import traceback
