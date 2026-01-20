@@ -1,338 +1,192 @@
 """
-PHASE 2: DEEP LEARNING MODEL ARCHITECTURES
-Hybrid models for SOH estimation
+OPTIMIZED DEEP LEARNING MODEL FOR SOH ESTIMATION
+Simplified architecture for faster training
 """
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import numpy as np
+import matplotlib.pyplot as plt
+from tqdm import tqdm
 import math
+import joblib
 
-class TemporalAttention(nn.Module):
-    """Attention mechanism for temporal sequences"""
-    
-    def __init__(self, hidden_dim, num_heads=4, dropout=0.1):
-        super().__init__()
-        self.multihead_attn = nn.MultiheadAttention(
-            hidden_dim, num_heads, dropout=dropout, batch_first=True
-        )
-        self.dropout = nn.Dropout(dropout)
-        self.layer_norm = nn.LayerNorm(hidden_dim)
-    
-    def forward(self, x):
-        # x shape: (batch, seq_len, hidden_dim)
-        attn_output, attn_weights = self.multihead_attn(x, x, x)
-        attn_output = self.dropout(attn_output)
-        output = self.layer_norm(x + attn_output)
-        return output, attn_weights
-
-
-class TemporalBranch(nn.Module):
-    """LSTM-based temporal dynamics branch"""
-    
-    def __init__(self, input_dim, hidden_dim=128, num_layers=2, dropout=0.3):
-        super().__init__()
-        
-        self.lstm = nn.LSTM(
-            input_dim, hidden_dim, 
-            num_layers=num_layers,
-            bidirectional=True,
-            batch_first=True,
-            dropout=dropout if num_layers > 1 else 0
-        )
-        
-        self.attention = TemporalAttention(hidden_dim * 2)  # *2 for bidirectional
-        self.dropout = nn.Dropout(dropout)
-        
-    def forward(self, x):
-        # x shape: (batch, seq_len, input_dim)
-        lstm_out, _ = self.lstm(x)  # (batch, seq_len, hidden_dim*2)
-        lstm_out = self.dropout(lstm_out)
-        
-        attn_out, attn_weights = self.attention(lstm_out)
-        
-        # Global average pooling over time dimension
-        pooled = attn_out.mean(dim=1)  # (batch, hidden_dim*2)
-        
-        return pooled, attn_weights
-
-
-class SpatialBranch(nn.Module):
-    """CNN-based spatial pattern extraction branch"""
-    
-    def __init__(self, input_dim, cnn_channels=[64, 128], kernel_sizes=[5, 3], dropout=0.2):
-        super().__init__()
-        
-        self.conv_layers = nn.ModuleList()
-        in_channels = 1  # Treat features as channels
-        
-        for i, (out_channels, kernel_size) in enumerate(zip(cnn_channels, kernel_sizes)):
-            conv = nn.Sequential(
-                nn.Conv1d(in_channels, out_channels, kernel_size, padding=kernel_size//2),
-                nn.BatchNorm1d(out_channels),
-                nn.ReLU(),
-                nn.Dropout(dropout)
-            )
-            self.conv_layers.append(conv)
-            in_channels = out_channels
-        
-        self.global_pool = nn.AdaptiveAvgPool1d(1)
-        
-    def forward(self, x):
-        # x shape: (batch, seq_len, input_dim)
-        # Reshape for CNN: (batch, channels, seq_len)
-        x = x.transpose(1, 2)  # (batch, input_dim, seq_len)
-        # Treat input_dim as channels
-        x = x.unsqueeze(1)  # (batch, 1, input_dim, seq_len)
-        
-        for conv in self.conv_layers:
-            x = conv(x)
-        
-        # Global pooling over sequence length
-        x = self.global_pool(x).squeeze(-1)  # (batch, channels)
-        
-        return x
-
-
-class TransformerBranch(nn.Module):
-    """Transformer-based branch for capturing long-range dependencies"""
-    
-    def __init__(self, input_dim, d_model=128, nhead=4, num_layers=2, dropout=0.1):
-        super().__init__()
-        
-        # Linear projection to d_model
-        self.input_proj = nn.Linear(input_dim, d_model)
-        
-        # Positional encoding
-        self.pos_encoder = PositionalEncoding(d_model, dropout)
-        
-        # Transformer encoder
-        encoder_layer = nn.TransformerEncoderLayer(
-            d_model=d_model,
-            nhead=nhead,
-            dim_feedforward=d_model * 4,
-            dropout=dropout,
-            batch_first=True
-        )
-        self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
-        
-        # Output projection
-        self.output_proj = nn.Linear(d_model, d_model)
-        
-    def forward(self, x):
-        # x shape: (batch, seq_len, input_dim)
-        x = self.input_proj(x)  # (batch, seq_len, d_model)
-        x = self.pos_encoder(x)
-        
-        # Transformer expects (seq_len, batch, d_model) for positional encoding compatibility
-        x = self.transformer_encoder(x)
-        
-        # Global average pooling
-        x = x.mean(dim=1)  # (batch, d_model)
-        x = self.output_proj(x)
-        
-        return x
-
-
-class PositionalEncoding(nn.Module):
-    """Positional encoding for transformer"""
-    
-    def __init__(self, d_model, dropout=0.1, max_len=5000):
-        super().__init__()
-        self.dropout = nn.Dropout(p=dropout)
-        
-        pe = torch.zeros(max_len, d_model)
-        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
-        
-        pe[:, 0::2] = torch.sin(position * div_term)
-        pe[:, 1::2] = torch.cos(position * div_term)
-        pe = pe.unsqueeze(0)  # (1, max_len, d_model)
-        
-        self.register_buffer('pe', pe)
-    
-    def forward(self, x):
-        # x shape: (batch, seq_len, d_model)
-        x = x + self.pe[:, :x.size(1), :]
-        return self.dropout(x)
-
-
-class SOHHybridModel(nn.Module):
-    """Hybrid model combining LSTM, CNN, and Transformer branches"""
+class SimplifiedSOHModel(nn.Module):
+    """
+    Simplified hybrid model for SOH estimation
+    Combines LSTM and CNN for efficiency
+    """
     
     def __init__(self, config):
         super().__init__()
         
-        # Extract configuration
         self.input_dim = config['num_features']
-        self.sequence_length = config.get('sequence_length', 360)
+        self.sequence_length = config.get('sequence_length', 180)
         
-        # Branch configurations
-        temporal_hidden = config.get('temporal_hidden', 128)
-        cnn_channels = config.get('cnn_channels', [64, 128])
-        d_model = config.get('d_model', 128)
-        
-        # Initialize branches
-        self.temporal_branch = TemporalBranch(
-            input_dim=self.input_dim,
-            hidden_dim=temporal_hidden,
-            num_layers=config.get('temporal_layers', 2),
-            dropout=config.get('temporal_dropout', 0.3)
+        # 1. LSTM for temporal patterns
+        self.lstm = nn.LSTM(
+            input_size=self.input_dim,
+            hidden_size=64,
+            num_layers=2,
+            bidirectional=True,
+            batch_first=True,
+            dropout=0.2
         )
         
-        self.spatial_branch = SpatialBranch(
-            input_dim=self.input_dim,
-            cnn_channels=cnn_channels,
-            kernel_sizes=config.get('kernel_sizes', [5, 3]),
-            dropout=config.get('spatial_dropout', 0.2)
-        )
-        
-        self.transformer_branch = TransformerBranch(
-            input_dim=self.input_dim,
-            d_model=d_model,
-            nhead=config.get('nhead', 4),
-            num_layers=config.get('transformer_layers', 2),
-            dropout=config.get('transformer_dropout', 0.1)
-        )
-        
-        # Calculate combined feature dimensions
-        temporal_out = temporal_hidden * 2  # bidirectional
-        spatial_out = cnn_channels[-1] if cnn_channels else 128
-        
-        combined_features = temporal_out + spatial_out + d_model
-        
-        # Fusion layers
-        self.fusion = nn.Sequential(
-            nn.Linear(combined_features, 256),
-            nn.BatchNorm1d(256),
-            nn.ReLU(),
-            nn.Dropout(config.get('fusion_dropout', 0.3)),
-            
-            nn.Linear(256, 128),
-            nn.BatchNorm1d(128),
-            nn.ReLU(),
-            nn.Dropout(config.get('fusion_dropout', 0.3)),
-        )
-        
-        # Regression head
-        self.regression_head = nn.Sequential(
-            nn.Linear(128, 64),
+        # 2. 1D CNN for local patterns
+        self.cnn = nn.Sequential(
+            # First conv block
+            nn.Conv1d(self.input_dim, 32, kernel_size=5, padding=2),
+            nn.BatchNorm1d(32),
             nn.ReLU(),
             nn.Dropout(0.2),
-            nn.Linear(64, 32),
+            
+            # Second conv block
+            nn.Conv1d(32, 64, kernel_size=3, padding=1),
+            nn.BatchNorm1d(64),
             nn.ReLU(),
+            nn.MaxPool1d(2),
+            nn.Dropout(0.2)
+        )
+        
+        # Calculate CNN output size
+        cnn_out_length = self.sequence_length // 2  # After maxpool
+        cnn_out_features = 64 * cnn_out_length
+        
+        # LSTM output size (bidirectional)
+        lstm_out_features = 64 * 2  # 64 hidden * 2 directions
+        
+        # Combined features
+        total_features = lstm_out_features + cnn_out_features
+        
+        # 3. Attention layer for important timesteps
+        self.attention = nn.Sequential(
+            nn.Linear(lstm_out_features, 32),
+            nn.Tanh(),
             nn.Linear(32, 1)
         )
         
-        # Uncertainty estimation head
-        self.uncertainty_head = nn.Sequential(
-            nn.Linear(128, 32),
+        # 4. Fusion and regression layers
+        self.fusion = nn.Sequential(
+            nn.Linear(total_features, 128),
+            nn.BatchNorm1d(128),
             nn.ReLU(),
-            nn.Linear(32, 1),
-            nn.Softplus()  # Ensure positive uncertainty
+            nn.Dropout(0.3),
+            
+            nn.Linear(128, 64),
+            nn.BatchNorm1d(64),
+            nn.ReLU(),
+            nn.Dropout(0.3),
         )
         
-    def forward(self, x, return_attention=False):
-        """
-        Forward pass through hybrid model
-        x: (batch, seq_len, input_dim)
-        Returns: predictions, uncertainty, (optional: attention weights)
-        """
-        # Extract features from each branch
-        temporal_features, attn_weights = self.temporal_branch(x)
-        spatial_features = self.spatial_branch(x)
-        transformer_features = self.transformer_branch(x)
+        # 5. Regression head
+        self.regression_head = nn.Sequential(
+            nn.Linear(64, 32),
+            nn.ReLU(),
+            nn.Dropout(0.2),
+            nn.Linear(32, 1)
+        )
         
-        # Concatenate branch outputs
-        combined = torch.cat([
-            temporal_features,
-            spatial_features,
-            transformer_features
-        ], dim=-1)
+        # 6. Uncertainty estimation (simplified)
+        self.uncertainty_head = nn.Sequential(
+            nn.Linear(64, 16),
+            nn.ReLU(),
+            nn.Linear(16, 1),
+            nn.Softplus()  # Ensure positive
+        )
         
-        # Fusion layers
+        print(f"Model initialized:")
+        print(f"  Input: {self.input_dim} features × {self.sequence_length} timesteps")
+        print(f"  LSTM output: {lstm_out_features} features")
+        print(f"  CNN output: {cnn_out_features} features")
+        print(f"  Total parameters: {sum(p.numel() for p in self.parameters()):,}")
+    
+    def forward(self, x):
+        """
+        x shape: (batch, seq_len, features)
+        """
+        batch_size = x.shape[0]
+        
+        # === LSTM Branch ===
+        lstm_out, _ = self.lstm(x)  # (batch, seq_len, 128)
+        
+        # Attention over timesteps
+        attn_weights = self.attention(lstm_out)  # (batch, seq_len, 1)
+        attn_weights = F.softmax(attn_weights, dim=1)
+        lstm_attended = torch.sum(lstm_out * attn_weights, dim=1)  # (batch, 128)
+        
+        # === CNN Branch ===
+        # Reshape for CNN: (batch, features, seq_len)
+        cnn_input = x.transpose(1, 2)  # (batch, features, seq_len)
+        cnn_out = self.cnn(cnn_input)  # (batch, 64, seq_len/2)
+        
+        # Flatten CNN output
+        cnn_flat = cnn_out.view(batch_size, -1)  # (batch, 64 * (seq_len/2))
+        
+        # === Fusion ===
+        combined = torch.cat([lstm_attended, cnn_flat], dim=1)  # (batch, total_features)
         fused = self.fusion(combined)
         
-        # Regression prediction
-        soh_pred = self.regression_head(fused)
-        
-        # Uncertainty estimation
+        # === Outputs ===
+        prediction = self.regression_head(fused)
         uncertainty = self.uncertainty_head(fused)
         
-        if return_attention:
-            return soh_pred, uncertainty, attn_weights
-        else:
-            return soh_pred, uncertainty
+        return prediction, uncertainty, attn_weights.squeeze(-1)
 
 
-class PhysicsInformedLoss(nn.Module):
-    """Physics-informed loss function for SOH estimation"""
+class EfficientLoss(nn.Module):
+    """Efficient loss function for SOH estimation"""
     
-    def __init__(self, alpha=0.1, beta=0.05, gamma=0.01):
+    def __init__(self, alpha=0.1):
         super().__init__()
-        self.alpha = alpha  # Weight for monotonicity loss
-        self.beta = beta    # Weight for smoothness loss
-        self.gamma = gamma  # Weight for physics loss
-        self.mse_loss = nn.MSELoss()
-        self.mae_loss = nn.L1Loss()
+        self.alpha = alpha
+        self.mse = nn.MSELoss()
+        self.mae = nn.L1Loss()
         
-    def forward(self, predictions, targets, uncertainties=None, previous_preds=None):
+    def forward(self, predictions, targets, uncertainties=None):
         """
-        Calculate combined loss with physics constraints
-        
-        Args:
-            predictions: Current batch predictions
-            targets: Ground truth
-            uncertainties: Predicted uncertainties
-            previous_preds: Previous predictions for monotonicity check
+        Calculate combined loss
         """
-        # Base regression loss
-        base_loss = self.mse_loss(predictions, targets)
+        # Base MSE loss
+        mse_loss = self.mse(predictions, targets)
         
         # MAE for robustness
-        mae_loss = self.mae_loss(predictions, targets)
+        mae_loss = self.mae(predictions, targets)
         
-        total_loss = base_loss + 0.5 * mae_loss
+        # Combined base loss
+        base_loss = 0.7 * mse_loss + 0.3 * mae_loss
         
-        # Uncertainty calibration loss (if uncertainties provided)
+        # Uncertainty calibration (optional)
         if uncertainties is not None:
-            # Negative log likelihood for proper uncertainty calibration
-            nll_loss = 0.5 * torch.mean(torch.log(uncertainties**2) + 
-                                        (predictions - targets)**2 / (uncertainties**2 + 1e-8))
-            total_loss = total_loss + 0.1 * nll_loss
+            # Simple uncertainty penalty
+            uncertainty_loss = uncertainties.mean()
+            base_loss = base_loss + 0.05 * uncertainty_loss
         
-        # Monotonicity constraint: SOH should not increase over time
-        if previous_preds is not None and len(previous_preds) > 0:
-            monotonic_loss = F.relu(predictions - previous_preds).mean()
-            total_loss = total_loss + self.alpha * monotonic_loss
-        
-        return total_loss
+        return base_loss
 
 
-class SOHModelManager:
-    """Manager class for handling model training and evaluation"""
+class EfficientTrainer:
+    """Efficient trainer for SOH model"""
     
     def __init__(self, config, device=None):
         self.config = config
         
-        # Set device
+        # Device setup
         if device is None:
             self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         else:
             self.device = device
-            
+        
         print(f"Using device: {self.device}")
         
         # Initialize model
-        self.model = SOHHybridModel(config).to(self.device)
+        self.model = SimplifiedSOHModel(config).to(self.device)
         
-        # Initialize optimizer
-        self.optimizer = self._create_optimizer()
-        
-        # Initialize loss function
-        self.criterion = PhysicsInformedLoss(
-            alpha=config.get('alpha', 0.1),
-            beta=config.get('beta', 0.05),
-            gamma=config.get('gamma', 0.01)
+        # Optimizer
+        self.optimizer = torch.optim.AdamW(
+            self.model.parameters(),
+            lr=config.get('lr', 1e-3),
+            weight_decay=config.get('weight_decay', 1e-4)
         )
         
         # Learning rate scheduler
@@ -341,67 +195,45 @@ class SOHModelManager:
             mode='min',
             factor=0.5,
             patience=10,
-            verbose=True
+            verbose=True,
+            min_lr=1e-6
         )
         
-        # Training history
+        # Loss function
+        self.criterion = EfficientLoss(alpha=config.get('alpha', 0.1))
+        
+        # History tracking
         self.history = {
-            'train_loss': [],
-            'val_loss': [],
-            'train_mae': [],
-            'val_mae': [],
-            'train_rmse': [],
-            'val_rmse': [],
-            'learning_rates': []
+            'train_loss': [], 'val_loss': [],
+            'train_mae': [], 'val_mae': [],
+            'train_rmse': [], 'val_rmse': [],
+            'lr': []
         }
         
-    def _create_optimizer(self):
-        """Create optimizer with different learning rates for different parts"""
-        
-        # Separate parameters
-        temporal_params = list(self.model.temporal_branch.parameters())
-        spatial_params = list(self.model.spatial_branch.parameters())
-        transformer_params = list(self.model.transformer_branch.parameters())
-        fusion_params = list(self.model.fusion.parameters())
-        head_params = list(self.model.regression_head.parameters()) + \
-                     list(self.model.uncertainty_head.parameters())
-        
-        # Create parameter groups with different learning rates
-        param_groups = [
-            {'params': temporal_params, 'lr': self.config.get('lr_temporal', 1e-3)},
-            {'params': spatial_params, 'lr': self.config.get('lr_spatial', 1e-3)},
-            {'params': transformer_params, 'lr': self.config.get('lr_transformer', 1e-3)},
-            {'params': fusion_params, 'lr': self.config.get('lr_fusion', 1e-3)},
-            {'params': head_params, 'lr': self.config.get('lr_head', 1e-3)},
-        ]
-        
-        optimizer = torch.optim.AdamW(
-            param_groups,
-            weight_decay=self.config.get('weight_decay', 1e-4)
-        )
-        
-        return optimizer
+        # Best model tracking
+        self.best_val_loss = float('inf')
+        self.best_model_state = None
     
     def train_epoch(self, train_loader, epoch):
         """Train for one epoch"""
         self.model.train()
         total_loss = 0
-        predictions = []
-        targets = []
+        all_preds = []
+        all_targets = []
         
-        pbar = tqdm(train_loader, desc=f'Epoch {epoch}')
+        pbar = tqdm(train_loader, desc=f'Epoch {epoch}', leave=False)
         
-        for batch_idx, batch in enumerate(pbar):
-            # Move data to device
+        for batch in pbar:
+            # Move to device
             sequences = batch['sequence'].to(self.device)
-            target = batch['target'].to(self.device)
+            targets = batch['target'].to(self.device)
             
             # Forward pass
             self.optimizer.zero_grad()
-            soh_pred, uncertainty = self.model(sequences)
+            predictions, uncertainty, _ = self.model(sequences)
             
             # Calculate loss
-            loss = self.criterion(soh_pred, target, uncertainty)
+            loss = self.criterion(predictions, targets, uncertainty)
             
             # Backward pass
             loss.backward()
@@ -412,88 +244,86 @@ class SOHModelManager:
             # Optimizer step
             self.optimizer.step()
             
-            # Update metrics
+            # Track metrics
             total_loss += loss.item()
-            predictions.extend(soh_pred.detach().cpu().numpy())
-            targets.extend(target.detach().cpu().numpy())
+            all_preds.extend(predictions.detach().cpu().numpy().flatten())
+            all_targets.extend(targets.detach().cpu().numpy().flatten())
             
             # Update progress bar
-            pbar.set_postfix({'loss': loss.item()})
+            pbar.set_postfix({'loss': f"{loss.item():.4f}"})
+
         
-        # Calculate metrics
-        predictions = np.array(predictions).flatten()
-        targets = np.array(targets).flatten()
+        # Calculate epoch metrics
+        all_preds = np.array(all_preds)
+        all_targets = np.array(all_targets)
         
-        mae = np.mean(np.abs(predictions - targets))
-        rmse = np.sqrt(np.mean((predictions - targets)**2))
+        mae = np.mean(np.abs(all_preds - all_targets))
+        rmse = np.sqrt(np.mean((all_preds - all_targets) ** 2))
         avg_loss = total_loss / len(train_loader)
         
         return avg_loss, mae, rmse
     
     def validate(self, val_loader):
-        """Validate the model"""
+        """Validate model"""
         self.model.eval()
         total_loss = 0
-        predictions = []
-        targets = []
-        uncertainties = []
+        all_preds = []
+        all_targets = []
+        all_uncertainties = []
         
         with torch.no_grad():
             for batch in val_loader:
                 sequences = batch['sequence'].to(self.device)
-                target = batch['target'].to(self.device)
+                targets = batch['target'].to(self.device)
                 
                 # Forward pass
-                soh_pred, uncertainty = self.model(sequences)
+                predictions, uncertainty, _ = self.model(sequences)
                 
                 # Calculate loss
-                loss = self.criterion(soh_pred, target, uncertainty)
+                loss = self.criterion(predictions, targets, uncertainty)
                 total_loss += loss.item()
                 
                 # Store predictions
-                predictions.extend(soh_pred.cpu().numpy())
-                targets.extend(target.cpu().numpy())
-                uncertainties.extend(uncertainty.cpu().numpy())
+                all_preds.extend(predictions.cpu().numpy().flatten())
+                all_targets.extend(targets.cpu().numpy().flatten())
+                all_uncertainties.extend(uncertainty.cpu().numpy().flatten())
         
         # Calculate metrics
-        predictions = np.array(predictions).flatten()
-        targets = np.array(targets).flatten()
-        uncertainties = np.array(uncertainties).flatten()
+        all_preds = np.array(all_preds)
+        all_targets = np.array(all_targets)
+        all_uncertainties = np.array(all_uncertainties)
         
-        mae = np.mean(np.abs(predictions - targets))
-        rmse = np.sqrt(np.mean((predictions - targets)**2))
+        mae = np.mean(np.abs(all_preds - all_targets))
+        rmse = np.sqrt(np.mean((all_preds - all_targets) ** 2))
         avg_loss = total_loss / len(val_loader)
         
-        # Calculate coverage of uncertainty intervals
-        coverage_95 = self._calculate_coverage(predictions, uncertainties, targets)
+        # Calculate R²
+        ss_res = np.sum((all_targets - all_preds) ** 2)
+        ss_tot = np.sum((all_targets - np.mean(all_targets)) ** 2)
+        r2 = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0
         
-        return avg_loss, mae, rmse, coverage_95, predictions, targets, uncertainties
-    
-    def _calculate_coverage(self, predictions, uncertainties, targets, confidence=0.95):
-        """Calculate coverage of uncertainty intervals"""
-        z_score = 1.96  # For 95% confidence
-        lower_bound = predictions - z_score * uncertainties
-        upper_bound = predictions + z_score * uncertainties
+        # Calculate coverage
+        lower = all_preds - 1.96 * all_uncertainties
+        upper = all_preds + 1.96 * all_uncertainties
+        coverage = np.mean((all_targets >= lower) & (all_targets <= upper))
         
-        coverage = np.mean((targets >= lower_bound) & (targets <= upper_bound))
-        return coverage
+        return avg_loss, mae, rmse, r2, coverage, all_preds, all_targets, all_uncertainties
     
-    def train(self, train_loader, val_loader, num_epochs=100, patience=20):
-        """Full training loop"""
+    def train(self, train_loader, val_loader, num_epochs=50, patience=15):
+        """Main training loop"""
         
         print("\n" + "="*60)
-        print("STARTING MODEL TRAINING")
+        print("TRAINING STARTED")
         print("="*60)
         
-        best_val_loss = float('inf')
-        patience_counter = 0
+        no_improve = 0
         
         for epoch in range(1, num_epochs + 1):
             # Train
             train_loss, train_mae, train_rmse = self.train_epoch(train_loader, epoch)
             
             # Validate
-            val_loss, val_mae, val_rmse, coverage, _, _, _ = self.validate(val_loader)
+            val_loss, val_mae, val_rmse, val_r2, val_coverage, _, _, _ = self.validate(val_loader)
             
             # Update learning rate
             self.scheduler.step(val_loss)
@@ -505,214 +335,319 @@ class SOHModelManager:
             self.history['val_mae'].append(val_mae)
             self.history['train_rmse'].append(train_rmse)
             self.history['val_rmse'].append(val_rmse)
-            self.history['learning_rates'].append(
-                self.optimizer.param_groups[0]['lr']
-            )
+            self.history['lr'].append(self.optimizer.param_groups[0]['lr'])
             
             # Print progress
             print(f"\nEpoch {epoch:3d}/{num_epochs}:")
-            print(f"  Train Loss: {train_loss:.4f}, MAE: {train_mae:.2f}%, RMSE: {train_rmse:.2f}%")
-            print(f"  Val Loss:   {val_loss:.4f}, MAE: {val_mae:.2f}%, RMSE: {val_rmse:.2f}%")
-            print(f"  Uncertainty Coverage (95%): {coverage:.3f}")
+            print(f"  Train - Loss: {train_loss:.4f}, MAE: {train_mae:.3f}%, RMSE: {train_rmse:.3f}%")
+            print(f"  Val   - Loss: {val_loss:.4f}, MAE: {val_mae:.3f}%, RMSE: {val_rmse:.3f}%")
+            print(f"         R²: {val_r2:.3f}, Coverage: {val_coverage:.3f}")
             
-            # Save best model
-            if val_loss < best_val_loss:
-                best_val_loss = val_loss
-                patience_counter = 0
-                self.save_model('best_model.pth')
-                print(f"  ↳ Saved best model (val_loss: {val_loss:.4f})")
+            # Check for improvement
+            if val_loss < self.best_val_loss:
+                self.best_val_loss = val_loss
+                self.best_model_state = self.model.state_dict().copy()
+                no_improve = 0
+                print(f"  ↳ New best model! (loss: {val_loss:.4f})")
+                
+                # Save best model
+                torch.save({
+                    'epoch': epoch,
+                    'model_state_dict': self.model.state_dict(),
+                    'optimizer_state_dict': self.optimizer.state_dict(),
+                    'scheduler_state_dict': self.scheduler.state_dict(),
+                    'val_loss': val_loss,
+                    'val_mae': val_mae,
+                    'val_rmse': val_rmse,
+                    'history': self.history
+                }, 'best_model.pth')
             else:
-                patience_counter += 1
-                print(f"  ↳ No improvement for {patience_counter} epoch(s)")
+                no_improve += 1
+                print(f"  ↳ No improvement for {no_improve} epoch(s)")
             
             # Early stopping
-            if patience_counter >= patience:
-                print(f"\nEarly stopping triggered after {epoch} epochs")
+            if no_improve >= patience:
+                print(f"\nEarly stopping at epoch {epoch}")
                 break
         
         # Load best model
-        self.load_model('best_model.pth')
-        print(f"\nTraining completed. Best validation loss: {best_val_loss:.4f}")
+        if self.best_model_state is not None:
+            self.model.load_state_dict(self.best_model_state)
+            print(f"\nLoaded best model (val_loss: {self.best_val_loss:.4f})")
+        
+        print(f"\nTraining completed. Best validation loss: {self.best_val_loss:.4f}")
         
         return self.history
     
-    def save_model(self, path):
-        """Save model and training state"""
-        torch.save({
-            'model_state_dict': self.model.state_dict(),
-            'optimizer_state_dict': self.optimizer.state_dict(),
-            'scheduler_state_dict': self.scheduler.state_dict(),
-            'history': self.history,
-            'config': self.config
-        }, path)
-    
-    def load_model(self, path):
-        """Load model and training state"""
-        checkpoint = torch.load(path, map_location=self.device)
-        self.model.load_state_dict(checkpoint['model_state_dict'])
-        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
-        self.history = checkpoint['history']
-        print(f"Model loaded from {path}")
-    
     def evaluate(self, test_loader):
-        """Evaluate model on test set"""
+        """Evaluate on test set"""
         self.model.eval()
         
-        val_loss, mae, rmse, coverage, predictions, targets, uncertainties = self.validate(test_loader)
+        test_loss, test_mae, test_rmse, test_r2, test_coverage, preds, targets, uncertainties = self.validate(test_loader)
         
         print("\n" + "="*60)
-        print("MODEL EVALUATION ON TEST SET")
+        print("TEST SET EVALUATION")
         print("="*60)
-        print(f"MAE:  {mae:.3f}%")
-        print(f"RMSE: {rmse:.3f}%")
-        print(f"R² Score: {self._calculate_r2(predictions, targets):.3f}")
-        print(f"Uncertainty Coverage (95%): {coverage:.3f}")
-        print(f"Average Uncertainty: {np.mean(uncertainties):.3f}")
+        print(f"MAE:  {test_mae:.3f}%")
+        print(f"RMSE: {test_rmse:.3f}%")
+        print(f"R²:   {test_r2:.3f}")
+        print(f"Coverage (95%): {test_coverage:.3f}")
+        print(f"Avg Uncertainty: {np.mean(uncertainties):.3f}")
         
         return {
-            'predictions': predictions,
+            'predictions': preds,
             'targets': targets,
             'uncertainties': uncertainties,
             'metrics': {
-                'mae': mae,
-                'rmse': rmse,
-                'coverage': coverage
+                'mae': test_mae,
+                'rmse': test_rmse,
+                'r2': test_r2,
+                'coverage': test_coverage
             }
         }
     
-    def _calculate_r2(self, predictions, targets):
-        """Calculate R² score"""
-        ss_res = np.sum((targets - predictions) ** 2)
-        ss_tot = np.sum((targets - np.mean(targets)) ** 2)
-        return 1 - (ss_res / ss_tot) if ss_tot != 0 else 0
-    
-    def visualize_training(self):
-        """Visualize training history"""
-        fig, axes = plt.subplots(2, 3, figsize=(15, 10))
+    def plot_training_history(self):
+        """Plot training history"""
+        fig, axes = plt.subplots(2, 2, figsize=(12, 8))
         
-        # Plot training and validation loss
-        axes[0, 0].plot(self.history['train_loss'], label='Train')
-        axes[0, 0].plot(self.history['val_loss'], label='Validation')
+        epochs = range(1, len(self.history['train_loss']) + 1)
+        
+        # Loss
+        axes[0, 0].plot(epochs, self.history['train_loss'], 'b-', label='Train', linewidth=2)
+        axes[0, 0].plot(epochs, self.history['val_loss'], 'r-', label='Validation', linewidth=2)
         axes[0, 0].set_xlabel('Epoch')
         axes[0, 0].set_ylabel('Loss')
         axes[0, 0].set_title('Training and Validation Loss')
         axes[0, 0].legend()
         axes[0, 0].grid(True, alpha=0.3)
         
-        # Plot MAE
-        axes[0, 1].plot(self.history['train_mae'], label='Train')
-        axes[0, 1].plot(self.history['val_mae'], label='Validation')
+        # MAE
+        axes[0, 1].plot(epochs, self.history['train_mae'], 'b-', label='Train', linewidth=2)
+        axes[0, 1].plot(epochs, self.history['val_mae'], 'r-', label='Validation', linewidth=2)
         axes[0, 1].set_xlabel('Epoch')
         axes[0, 1].set_ylabel('MAE (%)')
         axes[0, 1].set_title('Mean Absolute Error')
         axes[0, 1].legend()
         axes[0, 1].grid(True, alpha=0.3)
         
-        # Plot RMSE
-        axes[0, 2].plot(self.history['train_rmse'], label='Train')
-        axes[0, 2].plot(self.history['val_rmse'], label='Validation')
-        axes[0, 2].set_xlabel('Epoch')
-        axes[0, 2].set_ylabel('RMSE (%)')
-        axes[0, 2].set_title('Root Mean Square Error')
-        axes[0, 2].legend()
-        axes[0, 2].grid(True, alpha=0.3)
-        
-        # Plot learning rate
-        axes[1, 0].plot(self.history['learning_rates'])
+        # RMSE
+        axes[1, 0].plot(epochs, self.history['train_rmse'], 'b-', label='Train', linewidth=2)
+        axes[1, 0].plot(epochs, self.history['val_rmse'], 'r-', label='Validation', linewidth=2)
         axes[1, 0].set_xlabel('Epoch')
-        axes[1, 0].set_ylabel('Learning Rate')
-        axes[1, 0].set_title('Learning Rate Schedule')
+        axes[1, 0].set_ylabel('RMSE (%)')
+        axes[1, 0].set_title('Root Mean Square Error')
+        axes[1, 0].legend()
         axes[1, 0].grid(True, alpha=0.3)
         
-        # Plot loss vs MAE
-        axes[1, 1].scatter(self.history['train_loss'], self.history['train_mae'], 
-                          alpha=0.5, label='Train', s=10)
-        axes[1, 1].scatter(self.history['val_loss'], self.history['val_mae'], 
-                          alpha=0.5, label='Validation', s=10)
-        axes[1, 1].set_xlabel('Loss')
-        axes[1, 1].set_ylabel('MAE (%)')
-        axes[1, 1].set_title('Loss vs MAE')
-        axes[1, 1].legend()
+        # Learning rate
+        axes[1, 1].plot(epochs, self.history['lr'], 'g-', linewidth=2)
+        axes[1, 1].set_xlabel('Epoch')
+        axes[1, 1].set_ylabel('Learning Rate')
+        axes[1, 1].set_title('Learning Rate Schedule')
         axes[1, 1].grid(True, alpha=0.3)
+        axes[1, 1].set_yscale('log')
         
-        # Hide empty subplot
-        axes[1, 2].axis('off')
-        
-        plt.suptitle('Training History Visualization', fontsize=14, fontweight='bold')
+        plt.suptitle('Training History', fontsize=14, fontweight='bold')
         plt.tight_layout()
-        plt.savefig('training_history.png', dpi=150, bbox_inches='tight')
+        plt.savefig('training_history_simple.png', dpi=150, bbox_inches='tight')
         plt.show()
+    
+    def plot_predictions(self, test_results):
+        """Plot predictions vs actual"""
+        preds = test_results['predictions']
+        targets = test_results['targets']
+        uncertainties = test_results['uncertainties']
+        
+        fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+        
+        # Scatter plot
+        axes[0].scatter(targets, preds, alpha=0.5, s=20)
+        axes[0].plot([targets.min(), targets.max()], [targets.min(), targets.max()], 
+                    'r--', linewidth=2, label='Perfect Prediction')
+        axes[0].set_xlabel('Actual SOH (%)')
+        axes[0].set_ylabel('Predicted SOH (%)')
+        axes[0].set_title('Predictions vs Actual')
+        axes[0].legend()
+        axes[0].grid(True, alpha=0.3)
+        
+        # Add error bars for uncertainty
+        axes[0].errorbar(targets[::10], preds[::10], 
+                        yerr=1.96 * uncertainties[::10],
+                        fmt='o', alpha=0.5, capsize=3)
+        
+        # Residuals
+        residuals = preds - targets
+        axes[1].scatter(preds, residuals, alpha=0.5, s=20)
+        axes[1].axhline(y=0, color='r', linestyle='--', linewidth=2)
+        axes[1].set_xlabel('Predicted SOH (%)')
+        axes[1].set_ylabel('Residual (%)')
+        axes[1].set_title('Residual Plot')
+        axes[1].grid(True, alpha=0.3)
+        
+        # Add histogram of residuals
+        ax_hist = axes[1].inset_axes([0.6, 0.6, 0.35, 0.35])
+        ax_hist.hist(residuals, bins=30, alpha=0.7, edgecolor='black')
+        ax_hist.axvline(x=0, color='r', linestyle='--', linewidth=1)
+        ax_hist.set_xlabel('Residual')
+        ax_hist.set_ylabel('Frequency')
+        ax_hist.set_title('Residual Distribution')
+        
+        plt.suptitle('Model Predictions Analysis', fontsize=14, fontweight='bold')
+        plt.tight_layout()
+        plt.savefig('predictions_analysis.png', dpi=150, bbox_inches='tight')
+        plt.show()
+    
+    def save_final_model(self, path='final_model_simple.pth'):
+        """Save final model"""
+        torch.save({
+            'model_state_dict': self.model.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict(),
+            'scheduler_state_dict': self.scheduler.state_dict(),
+            'history': self.history,
+            'config': self.config,
+            'best_val_loss': self.best_val_loss
+        }, path)
+        print(f"\nFinal model saved to {path}")
 
 
-def main_model_training(dataloaders, data_config):
-    """Main function for model training"""
+def quick_model_test(dataloaders, config):
+    """Quick test to ensure everything works"""
+    print("Running quick model test...")
+    
+    # Get one batch
+    batch = next(iter(dataloaders['train_loader']))
+    
+    print(f"Batch shape: {batch['sequence'].shape}")
+    print(f"Target shape: {batch['target'].shape}")
+    
+    # Initialize model
+    model = SimplifiedSOHModel(config)
+    
+    # Test forward pass
+    with torch.no_grad():
+        preds, uncert, attn = model(batch['sequence'])
+    
+    print(f"Predictions shape: {preds.shape}")
+    print(f"Uncertainty shape: {uncert.shape}")
+    print(f"Attention shape: {attn.shape}")
+    
+    # Test loss
+    criterion = EfficientLoss()
+    loss = criterion(preds, batch['target'], uncert)
+    print(f"Loss value: {loss.item():.4f}")
+    
+    print("✅ Quick test passed!")
+    return True
+
+
+def main_training_pipeline(dataloaders, data_config):
+    """Main training pipeline"""
     
     print("="*80)
-    print("PHASE 2: DEEP LEARNING MODEL TRAINING")
+    print("PHASE 2: SIMPLIFIED MODEL TRAINING")
     print("="*80)
     
-    # Update data_config with model parameters
+    # Model configuration
     model_config = {
-        **data_config,  # Include sequence_length, num_features
-        'temporal_hidden': 128,
-        'temporal_layers': 2,
-        'temporal_dropout': 0.3,
-        'cnn_channels': [64, 128],
-        'kernel_sizes': [5, 3],
-        'spatial_dropout': 0.2,
-        'd_model': 128,
-        'nhead': 4,
-        'transformer_layers': 2,
-        'transformer_dropout': 0.1,
-        'fusion_dropout': 0.3,
-        'lr_temporal': 1e-3,
-        'lr_spatial': 1e-3,
-        'lr_transformer': 1e-3,
-        'lr_fusion': 1e-3,
-        'lr_head': 1e-3,
+        **data_config,  # Includes num_features, sequence_length
+        'lr': 1e-3,
         'weight_decay': 1e-4,
-        'alpha': 0.1,
-        'beta': 0.05,
-        'gamma': 0.01
+        'alpha': 0.1
     }
     
-    # Initialize model manager
-    model_manager = SOHModelManager(model_config)
+    # Quick test
+    quick_model_test(dataloaders, model_config)
     
-    # Print model architecture
-    print("\nModel Architecture:")
-    print("="*40)
-    print(f"Input dimension: {model_config['num_features']}")
-    print(f"Sequence length: {model_config['sequence_length']}")
-    print(f"Total parameters: {sum(p.numel() for p in model_manager.model.parameters()):,}")
+    # Initialize trainer
+    trainer = EfficientTrainer(model_config)
     
     # Train model
-    history = model_manager.train(
-        dataloaders['train_loader'],
-        dataloaders['val_loader'],
-        num_epochs=100,
-        patience=20
+    print("\nStarting training...")
+    history = trainer.train(
+        train_loader=dataloaders['train_loader'],
+        val_loader=dataloaders['val_loader'],
+        num_epochs=50,
+        patience=15
     )
     
-    # Visualize training
-    model_manager.visualize_training()
+    # Plot training history
+    trainer.plot_training_history()
     
     # Evaluate on test set
-    test_results = model_manager.evaluate(dataloaders['test_loader'])
+    test_results = trainer.evaluate(dataloaders['test_loader'])
+    
+    # Plot predictions
+    trainer.plot_predictions(test_results)
     
     # Save final model
-    model_manager.save_model('final_model.pth')
-    print(f"\nFinal model saved to final_model.pth")
+    trainer.save_final_model()
     
-    return model_manager, test_results
+    # Print summary
+    print("\n" + "="*60)
+    print("TRAINING SUMMARY")
+    print("="*60)
+    print(f"Best validation loss: {trainer.best_val_loss:.4f}")
+    print(f"Test MAE:  {test_results['metrics']['mae']:.3f}%")
+    print(f"Test RMSE: {test_results['metrics']['rmse']:.3f}%")
+    print(f"Test R²:   {test_results['metrics']['r2']:.3f}")
+    
+    return trainer, test_results
+
+
+def run_standalone():
+    """Run standalone if dataloaders not available"""
+    print("Standalone mode - Loading saved configuration...")
+    
+    try:
+        # Load data configuration
+        data_config = joblib.load('data_config.pkl')
+        
+        print(f"Loaded configuration:")
+        print(f"  Features: {data_config['num_features']}")
+        print(f"  Sequence length: {data_config['sequence_length']}")
+        
+        # Create dummy dataloaders for testing
+        class DummyDataset:
+            def __init__(self):
+                self.sequences = torch.randn(100, data_config['sequence_length'], data_config['num_features'])
+                self.targets = torch.randn(100, 1) * 10 + 80  # SOH around 80-90%
+            
+            def __len__(self):
+                return len(self.sequences)
+            
+            def __getitem__(self, idx):
+                return {
+                    'sequence': self.sequences[idx],
+                    'target': self.targets[idx]
+                }
+        
+        from torch.utils.data import DataLoader
+        
+        dummy_dataset = DummyDataset()
+        dummy_loader = DataLoader(dummy_dataset, batch_size=16, shuffle=True)
+        
+        dataloaders = {
+            'train_loader': dummy_loader,
+            'val_loader': dummy_loader,
+            'test_loader': dummy_loader
+        }
+        
+        # Run training
+        trainer, results = main_training_pipeline(dataloaders, data_config)
+        
+    except Exception as e:
+        print(f"Error: {e}")
+        print("\nPlease run Phase 1 first to create proper dataloaders.")
 
 
 if __name__ == "__main__":
-    # Assuming dataloaders and data_config are available from Phase 1
-    # For standalone testing, load them:
-    import joblib
-    data_config = joblib.load('data_config.pkl')
-    # dataloaders would need to be recreated or saved
+    # Check if we have CUDA
+    if torch.cuda.is_available():
+        print(f"CUDA available: {torch.cuda.get_device_name(0)}")
+        print(f"GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
+    else:
+        print("CUDA not available, using CPU")
     
-    print("Run Phase 1 first to create dataloaders, then run Phase 2")
+    # Run training
+    print("\nTo run properly, execute from main script after Phase 1")
+    print("For testing, run: run_standalone()")
