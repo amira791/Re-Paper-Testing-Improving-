@@ -836,13 +836,15 @@ def main_data_preparation():
         
         # Save data configuration
         data_config = {
-            'feature_names': dataloaders['feature_names'],
-            'sequence_length': config['sequence_length'],
-            'vehicle_splits': dataloaders['vehicle_splits'],
-            'num_features': len(dataloaders['feature_names']),
-            'target_column': 'soh_capacity',
-            'debug_mode': DEBUG_MODE
-        }
+          'feature_names': dataloaders['feature_names'],
+          'sequence_length': config['sequence_length'],
+          'num_features': len(dataloaders['feature_names']),
+          'target_column': 'soh_capacity',
+          'vehicle_splits': dataloaders['vehicle_splits'],
+          'prepared_data_dir': "prepared_data",
+          'debug_mode': DEBUG_MODE
+                      }
+
         
         joblib.dump(data_config, 'data_config.pkl')
         print(f"\nData configuration saved to data_config.pkl")
@@ -863,7 +865,30 @@ def main_data_preparation():
         import traceback
         traceback.print_exc()
         return None
+    
+def save_prepared_arrays(dataloaders, output_dir="prepared_data"):
+    """
+    Save prepared sequences and targets to disk
+    """
+    output_dir = Path(output_dir)
+    output_dir.mkdir(exist_ok=True)
 
+    splits = {
+        "train": dataloaders["train_dataset"],
+        "val": dataloaders["val_dataset"],
+        "test": dataloaders["test_dataset"]
+    }
+
+    for split, dataset in splits.items():
+        X = dataset.sequences.astype(np.float32)
+        y = dataset.targets.astype(np.float32)
+
+        np.save(output_dir / f"X_{split}.npy", X)
+        np.save(output_dir / f"y_{split}.npy", y)
+
+        print(f"Saved {split}: X{X.shape}, y{y.shape}")
+
+    print(f"\nPrepared arrays saved in: {output_dir.resolve()}")
 
 if __name__ == "__main__":
     try:
@@ -878,14 +903,15 @@ if __name__ == "__main__":
         os.environ['MKL_NUM_THREADS'] = '4'
         
         dataloaders, data_config = main_data_preparation()
+        save_prepared_arrays(dataloaders, output_dir="prepared_data")
         if dataloaders:
-            print("\n✅ Phase 1 completed successfully!")
+            print("\n Phase 1 completed successfully!")
         else:
-            print("\n❌ Phase 1 failed!")
+            print("\n Phase 1 failed!")
             
     except KeyboardInterrupt:
-        print("\n\n⚠️ Process interrupted by user")
+        print("\n\n Process interrupted by user")
     except Exception as e:
-        print(f"\n❌ Critical error in Phase 1: {e}")
+        print(f"\n Critical error in Phase 1: {e}")
         import traceback
         traceback.print_exc()

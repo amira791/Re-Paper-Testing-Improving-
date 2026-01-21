@@ -11,6 +11,28 @@ from tqdm import tqdm
 import math
 import joblib
 
+from torch.utils.data import Dataset, DataLoader
+from pathlib import Path
+
+
+class PreparedSOHDataset(Dataset):
+    """
+    Dataset for prepared SOH sequences saved from Phase 1
+    """
+    def __init__(self, X, y):
+        self.X = torch.from_numpy(X).float()
+        self.y = torch.from_numpy(y).float()
+
+    def __len__(self):
+        return len(self.X)
+
+    def __getitem__(self, idx):
+        return {
+            'sequence': self.X[idx],           # (seq_len, features)
+            'target': self.y[idx].unsqueeze(-1)
+        }
+
+
 class SimplifiedSOHModel(nn.Module):
     """
     Simplified hybrid model for SOH estimation
@@ -195,7 +217,6 @@ class EfficientTrainer:
             mode='min',
             factor=0.5,
             patience=10,
-            verbose=True,
             min_lr=1e-6
         )
         
@@ -593,51 +614,84 @@ def main_training_pipeline(dataloaders, data_config):
     
     return trainer, test_results
 
+def load_prepared_dataloaders(
+    data_dir="prepared_data",
+    batch_size=32
+):
+    """
+    Load dataloaders from Phase 1 prepared numpy arrays
+    """
+    data_dir = Path(data_dir)
+
+    X_train = np.load(data_dir / "X_train.npy")
+    y_train = np.load(data_dir / "y_train.npy")
+
+    X_val = np.load(data_dir / "X_val.npy")
+    y_val = np.load(data_dir / "y_val.npy")
+
+    X_test = np.load(data_dir / "X_test.npy")
+    y_test = np.load(data_dir / "y_test.npy")
+
+    train_loader = DataLoader(
+        PreparedSOHDataset(X_train, y_train),
+        batch_size=batch_size,
+        shuffle=True,
+        drop_last=True
+    )
+
+    val_loader = DataLoader(
+        PreparedSOHDataset(X_val, y_val),
+        batch_size=batch_size,
+        shuffle=False
+    )
+
+    test_loader = DataLoader(
+        PreparedSOHDataset(X_test, y_test),
+        batch_size=batch_size,
+        shuffle=False
+    )
+
+    print("Loaded prepared dataloaders:")
+    print(f"  Train: {X_train.shape}")
+    print(f"  Val:   {X_val.shape}")
+    print(f"  Test:  {X_test.shape}")
+
+    return {
+        'train_loader': train_loader,
+        'val_loader': val_loader,
+        'test_loader': test_loader
+    }
+
 
 def run_standalone():
-    """Run standalone if dataloaders not available"""
-    print("Standalone mode - Loading saved configuration...")
-    
+    """
+    Standalone execution using Phase 1 prepared data
+    """
+    print("Standalone mode - Loading prepared data...")
+
     try:
         # Load data configuration
         data_config = joblib.load('data_config.pkl')
-        
+
         print(f"Loaded configuration:")
         print(f"  Features: {data_config['num_features']}")
         print(f"  Sequence length: {data_config['sequence_length']}")
-        
-        # Create dummy dataloaders for testing
-        class DummyDataset:
-            def __init__(self):
-                self.sequences = torch.randn(100, data_config['sequence_length'], data_config['num_features'])
-                self.targets = torch.randn(100, 1) * 10 + 80  # SOH around 80-90%
-            
-            def __len__(self):
-                return len(self.sequences)
-            
-            def __getitem__(self, idx):
-                return {
-                    'sequence': self.sequences[idx],
-                    'target': self.targets[idx]
-                }
-        
-        from torch.utils.data import DataLoader
-        
-        dummy_dataset = DummyDataset()
-        dummy_loader = DataLoader(dummy_dataset, batch_size=16, shuffle=True)
-        
-        dataloaders = {
-            'train_loader': dummy_loader,
-            'val_loader': dummy_loader,
-            'test_loader': dummy_loader
-        }
-        
-        # Run training
-        trainer, results = main_training_pipeline(dataloaders, data_config)
-        
+
+        # Load real prepared dataloaders
+        dataloaders = load_prepared_dataloaders(
+            data_dir=data_config.get("prepared_data_dir", "prepared_data"),
+            batch_size=32
+        )
+
+        # Run training pipeline
+        trainer, results = main_training_pipeline(
+            dataloaders,
+            data_config
+        )
+
     except Exception as e:
         print(f"Error: {e}")
-        print("\nPlease run Phase 1 first to create proper dataloaders.")
+        print("\nMake sure Phase 1 has been run successfully.")
 
 
 if __name__ == "__main__":
@@ -649,5 +703,5 @@ if __name__ == "__main__":
         print("CUDA not available, using CPU")
     
     # Run training
-    print("\nTo run properly, execute from main script after Phase 1")
-    print("For testing, run: run_standalone()")
+    print("\nRunning standalone training from prepared data...")
+    run_standalone()
