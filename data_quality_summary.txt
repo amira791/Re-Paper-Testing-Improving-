@@ -1,0 +1,9 @@
+DATA QUALITY SUMMARY
+==================================================
+
+Total Rows Before: 1188470
+Total Rows After: 976847
+Total Columns Before: 19
+Total Columns After: 29
+Missing Reduction (%): 38.72
+Overall Quality Score: 84.09

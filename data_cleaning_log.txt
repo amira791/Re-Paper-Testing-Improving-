@@ -1,0 +1,70 @@
+DATA CLEANING LOG
+==================================================
+
+FIX 1: Handling Vehicle 7 temperature data
+   Fixed 0 missing temperature values
+
+FIX 2: Fixing temperature outliers
+   bcell_maxTemp: Fixed 21 outliers
+   bcell_minTemp: Fixed 8 outliers
+
+FIX 3: Fixing SOH clipping artifacts
+   Found 301,653 rows at 70% SOH (lower bound)
+   Found 747,835 rows at 105% SOH (upper bound)
+   Total at boundaries: 1,049,488 (88.3%)
+
+FIX 4: Handling sensor faults (65535 values)
+
+FIX 5: Fixing broken time series
+   Created 88,543 driving/charging sessions
+   Created relative time within sessions
+
+FIX 6: Balancing Vehicle 7 dominance
+   Vehicle distribution before balancing:
+     Vehicle 7: 324,100 rows
+     Vehicle 6: 162,571 rows
+     Vehicle 4: 151,192 rows
+     Vehicle 3: 114,744 rows
+     Vehicle 5: 109,900 rows
+     Vehicle 2: 91,406 rows
+     Vehicle 1: 81,898 rows
+     Vehicle 9: 68,290 rows
+     Vehicle 8: 52,125 rows
+     Vehicle 10: 32,244 rows
+
+   After balancing:
+     Original dataset: 1,188,470 rows
+     Balanced dataset: 976,847 rows
+     Target per vehicle: ~142,080 rows
+     Imbalance ratio: 10.1x → 4.4x
+     Vehicle 1: 81,898 rows
+     Vehicle 2: 91,406 rows
+     Vehicle 3: 114,744 rows
+     Vehicle 4: 142,080 rows
+     Vehicle 5: 109,900 rows
+     Vehicle 6: 142,080 rows
+     Vehicle 7: 142,080 rows
+     Vehicle 8: 52,125 rows
+     Vehicle 9: 68,290 rows
+     Vehicle 10: 32,244 rows
+
+FIX 7: Creating derived features
+   Created: cell_imbalance
+   Created: temp_gradient
+   Created: power_kw
+   Created: soc_category
+   Created: driving_intensity
+
+FIX 8: Enhanced missing value imputation
+   Total missing values before imputation: 1,124,818
+   vhc_speed: Imputed 292 values (292 → 0)
+   hv_current: Imputed 292 values (292 → 0)
+   hv_voltage: Imputed 292 values (292 → 0)
+   bcell_soc: Imputed 292 values (292 → 0)
+   bcell_maxVoltage: Imputed 86,420 values (86,420 → 0)
+   bcell_minVoltage: Imputed 83,933 values (83,933 → 0)
+   bcell_Temp: Imputed 834,767 values (834,767 → 0)
+   cell_imbalance: Imputed 118,238 values (118,238 → 0)
+   power_kw: Imputed 292 values (292 → 0)
+   Total reduction: 489,700 values (43.5%)
+   Final missing values: 635,118

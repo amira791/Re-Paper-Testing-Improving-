@@ -1,0 +1,53 @@
+DATA CLEANING VERIFICATION
+==================================================
+
+bcell_maxTemp: Range = 7.0°C to 60.0°C
+  ✅ OK: Within realistic range
+bcell_minTemp: Range = -20.0°C to 44.0°C
+  ✅ OK: Within realistic range
+bcell_Temp: Range = 7.0°C to 27.0°C
+  ✅ OK: Within realistic range
+
+SOH boundary values:
+  At exactly 70%: 0 rows
+  At exactly 105%: 0 rows
+  ✅ OK: Minimal boundary clustering
+
+Missing values after cleaning:
+  ⚠️ WARNING: 6 columns still have missing values
+  Total missing: 635,118 (65.02%)
+    charging_signal: 292 missing (0.03%)
+    vhc_totalMile: 292 missing (0.03%)
+    time_diff: 83,343 missing (8.53%)
+    segment: 550,607 missing (56.37%)
+    soc_category: 292 missing (0.03%)
+    driving_intensity: 292 missing (0.03%)
+
+Time series verification:
+  Negative time intervals: 0
+  Gaps > 1 hour: 0
+  ✅ OK: No negative time intervals
+
+Vehicle distribution:
+  Most data: Vehicle 6 (142,080 rows)
+  Least data: Vehicle 10 (32,244 rows)
+  Imbalance ratio: 4.4x
+  ✅ OK: Reasonable balance
+  Detailed distribution:
+    Vehicle 1: 81,898 rows
+    Vehicle 2: 91,406 rows
+    Vehicle 3: 114,744 rows
+    Vehicle 4: 142,080 rows
+    Vehicle 5: 109,900 rows
+    Vehicle 6: 142,080 rows
+    Vehicle 7: 142,080 rows
+    Vehicle 8: 52,125 rows
+    Vehicle 9: 68,290 rows
+    Vehicle 10: 32,244 rows
+
+New features created:
+  cell_imbalance: ✅ Present
+  temp_gradient: ✅ Present
+  power_kw: ✅ Present
+  soc_category: ⚠️ 292 missing
+  driving_intensity: ⚠️ 292 missing

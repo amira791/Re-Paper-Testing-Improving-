@@ -1,0 +1,14 @@
+DATASET SUMMARY REPORT
+==================================================
+
+Total Rows               : 1,188,470
+Total Columns            : 19
+Numerical Columns        : 17
+Categorical Columns      : 2
+Missing Columns          : 9
+Has Time Series          : Yes
+Unique Vehicles          : 10
+Chemistry Types          : ['NCM', 'LFP']
+Vehicle Types            : ['passenger', 'bus']
+SOH Range                : 70.0% - 105.0%
+Average SOH              : 94.2%
