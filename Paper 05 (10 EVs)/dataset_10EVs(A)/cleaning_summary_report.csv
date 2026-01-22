@@ -1,0 +1,10 @@
+vehicle,time_sentinel_fixed,time_gaps,sentinel_columns,sentinel_counts,mileage_range,soc_initial_nan,soc_out_of_range,soc_large_jumps,soc_corrected,soc_final_nan,soc_range
+1,0,{},0,{},"(np.int64(81491), np.int64(88424))",0,0,0,0,0,"(np.int64(20), np.int64(98))"
+2,0,{},0,{},"(np.int64(168758), np.int64(174566))",0,0,0,0,0,"(np.int64(5), np.int64(97))"
+3,0,{},0,{},"(np.int64(300689), np.int64(307466))",0,0,0,0,0,"(np.int64(11), np.int64(99))"
+4,0,{},0,{},"(np.int64(377700), np.int64(387325))",0,0,0,0,0,"(np.int64(4), np.int64(99))"
+5,0,{},0,{},"(np.int64(226316), np.int64(233783))",0,0,0,0,0,"(np.int64(5), np.int64(100))"
+6,0,{},0,{},"(np.int64(246369), np.int64(257453))",0,0,0,0,0,"(np.int64(1), np.int64(99))"
+8,0,{},2,"{'bcell_maxVoltage': np.int64(23328), 'bcell_minVoltage': np.int64(23760)}","(np.float64(50388.5), np.float64(68650.35944444481))",292,0,0,292,0,"(np.float64(28.0), np.float64(100.0))"
+9,0,{},3,"{'bcell_maxVoltage': np.int64(42453), 'bcell_minVoltage': np.int64(38369), 'bcell_minVoltage_extreme': np.int64(8)}","(np.int64(305135), np.int64(308793))",0,0,0,0,0,"(np.int64(16), np.int64(100))"
+10,0,{},3,"{'bcell_maxVoltage': np.int64(20639), 'bcell_minVoltage': np.int64(21255), 'bcell_minVoltage_extreme': np.int64(1)}","(np.int64(135548), np.int64(138296))",0,0,0,0,0,"(np.int64(46), np.int64(100))"

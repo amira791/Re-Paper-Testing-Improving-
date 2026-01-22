@@ -9,7 +9,7 @@ warnings.filterwarnings('ignore')
 
 # Set up paths
 DATA_PATH = Path(r"C:\Users\admin\Desktop\DR2\3 Coding\Re-Paper-Testing-Improving-\Paper 05 (10 EVs)\dataset_10EVs(B)")
-OUTPUT_PATH = Path("./analysis_output/data_quality")
+OUTPUT_PATH = Path(r'C:\Users\admin\Desktop\DR2\3 Coding\Re-Paper-Testing-Improving-\Paper 05 (10 EVs)\improved_approach\dataset_analysis_before\results_before')
 OUTPUT_PATH.mkdir(exist_ok=True, parents=True)
 
 def check_sensor_anomalies(df, vehicle_num):

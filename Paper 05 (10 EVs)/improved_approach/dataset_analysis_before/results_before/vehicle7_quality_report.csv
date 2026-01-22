@@ -1,0 +1,10 @@
+metric,value
+vehicle,7
+total_rows,324100
+total_columns,8
+columns,"['time', 'bcell_soc', 'hv_voltage', 'hv_current', 'vhc_speed', 'bcell_Temp', 'vhc_totalMile', 'charging_signal']"
+anomalies,"{'time_65535_sentinel': np.int64(324100), 'vhc_totalmile_65535_sentinel': np.int64(324100), 'timestamp_inconsistencies': np.int64(324095)}"
+total_anomalies,972295
+missing_info,"{'total_missing': np.int64(0), 'missing_percentage': np.float64(0.0)}"
+distributions,"{'vhc_speed': {'mean': np.float64(6.331783400185128), 'std': np.float64(13.692292775514428), 'min': np.int64(0), 'max': np.int64(69), 'median': np.float64(0.0), 'skewness': np.float64(2.114106100755421), 'kurtosis': np.float64(3.226460967593335), 'zeros_pct': np.float64(75.41098426411601), 'outliers_3sigma': np.int64(7238)}, 'hv_current': {'mean': np.float64(0.10381672323356989), 'std': np.float64(20.515457012587554), 'min': np.int64(-108), 'max': np.int64(178), 'median': np.float64(1.0), 'skewness': np.float64(0.2901486694957813), 'kurtosis': np.float64(4.610199475324709), 'zeros_pct': np.float64(23.704720765195926), 'outliers_3sigma': np.int64(5203)}, 'bcell_soc': {'mean': np.float64(66.92326442456032), 'std': np.float64(16.415056476063867), 'min': np.int64(23), 'max': np.int64(100), 'median': np.float64(66.0), 'skewness': np.float64(-0.14149465148201051), 'kurtosis': np.float64(-0.49995591899190517), 'zeros_pct': np.float64(0.0), 'outliers_3sigma': np.int64(0)}}"
+quality_score,50.0

@@ -1,0 +1,2 @@
+vehicle,event_id,duration_seconds,duration_hours,delta_soc,integrated_current_ah,estimated_capacity_ah,initial_capacity_ah,soh_percent,avg_current_a
+1,323,4880.0,1.3555555555555556,25.0,57.176111111111254,228.70444444444502,150,152.46962962963002,-41.985665529010234

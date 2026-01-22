@@ -11,7 +11,7 @@ warnings.filterwarnings('ignore')
 
 # Set up paths
 DATA_PATH = Path(r"C:\Users\admin\Desktop\DR2\3 Coding\Re-Paper-Testing-Improving-\Paper 05 (10 EVs)\dataset_10EVs(B)")
-OUTPUT_PATH = Path("./analysis_output/soh_estimation")
+OUTPUT_PATH = Path(r'C:\Users\admin\Desktop\DR2\3 Coding\Re-Paper-Testing-Improving-\Paper 05 (10 EVs)\improved_approach\dataset_analysis_before\results_before')
 OUTPUT_PATH.mkdir(exist_ok=True, parents=True)
 
 # Initial capacities from README
